@@ -4,7 +4,7 @@ import json
 from flask import Flask, jsonify, request
 from uuid import uuid4
 from urllib.parse import urlparse
-
+import requests
 # {
 #     "index": 0,
 #     "timestamp": "",
@@ -31,6 +31,35 @@ class Blockchain:
         parsed_url = urlparse(address)
         self.nodes.add(parsed_url.netloc)
 
+    def resolve_conlicts(self):
+        neighbours = self.nodes
+        max_length = len(self.chain)
+        new_chain = None
+
+        for node in neighbours:
+            response = requests.get(f'http://{node}/chain')
+            # print(response.status_code)
+            if response.status_code == 200:
+                length = response.json()["length"]
+                chain = response.json()['chain']
+                # print(chain)
+                if length > max_length and self.valid_chain(chain):
+                    max_length = length
+                    new_chain = chain
+        if new_chain:
+            self.chain = new_chain
+            return True
+        return False
+
+    def valid_chain(self, chain):
+        for i in range(1, len(chain)):
+            block = chain[i]
+            last_block = chain[i-1]
+            if block['previous_hash'] != self.hash(last_block):
+                return False
+            if not self.valid_proof(last_block['proof'], block['proof']):
+                return False
+        return True
 
     def new_block(self, proof, previous_hash = None):
         block = {
@@ -152,6 +181,22 @@ def register_node():
         "total_nodes": list(blockchain.nodes)
     }
     return jsonify(response), 201
+
+@app.route("/nodes/resolve", methods=['get'])
+def consensus():
+    replaced = blockchain.resolve_conlicts()
+    if replaced:
+        response = {
+            "message": "Blockchain was replaced",
+            "new_chain": blockchain.chain
+        }
+    else:
+        response = {
+            "message": "Our chain is authoritate",
+            "chain": blockchain.chain
+        }
+    return jsonify(response), 201
+
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5001)
